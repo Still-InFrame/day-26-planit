@@ -1,5 +1,7 @@
 # planit
 
+**Live:** https://planit.100dayaichallenge.com
+
 **Plan trips together. Split fairly. Stay on budget.**
 
 planit turns the messy "who paid for what" group-trip spreadsheet into a premium, real-time app. Everyone sets their own budget, logs who covered each activity (splitting is fine), and instantly sees how the spend balances out — who's over, who's under, and how much of the shared pool is left.
