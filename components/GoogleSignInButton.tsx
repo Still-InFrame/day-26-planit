@@ -9,9 +9,12 @@ export function GoogleSignInButton() {
   async function signIn() {
     setLoading(true);
     const supabase = createClient();
+    const next = new URLSearchParams(window.location.search).get("next") || "/";
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
     });
     if (error) {
       console.error(error);
@@ -23,7 +26,7 @@ export function GoogleSignInButton() {
     <button
       onClick={signIn}
       disabled={loading}
-      className="flex items-center gap-3 rounded-md border border-zinc-300 bg-white px-5 py-2.5 text-sm font-medium text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+      className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-surface px-5 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-background disabled:opacity-60"
     >
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
         <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" />

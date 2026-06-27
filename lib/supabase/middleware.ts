@@ -32,12 +32,14 @@ export async function updateSession(request: NextRequest) {
   const url = request.nextUrl;
   const isAuthRoute =
     url.pathname.startsWith("/login") || url.pathname.startsWith("/auth");
-  // Add any other public route prefixes here (e.g. "/share").
-  const isPublic = false;
+  // Invite landing pages are public so a logged-out invitee can preview a plan.
+  const isPublic = url.pathname.startsWith("/join");
 
   if (!user && !isAuthRoute && !isPublic) {
     const redirect = url.clone();
     redirect.pathname = "/login";
+    // Preserve where they were headed so we can return them after sign-in.
+    redirect.searchParams.set("next", url.pathname + url.search);
     return NextResponse.redirect(redirect);
   }
 

@@ -42,3 +42,8 @@ next-env.d.ts
 .env*.local
 .claude/settings.local.json
 CLAUDE.md
+
+# local workflow helper scripts (personal tooling — not part of the app)
+backup.sh
+deploy.sh
+publish.sh
