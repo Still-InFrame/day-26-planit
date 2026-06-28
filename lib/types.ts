@@ -11,6 +11,7 @@ export type EventRow = {
   currency: string;
   is_private: boolean;
   settle_up_enabled: boolean;
+  points_affect_budget: boolean;
   invite_token: string;
   created_at: string;
 };
@@ -75,6 +76,7 @@ export type ContributionRow = {
   item_id: string;
   member_id: string;
   amount: number;
+  is_points: boolean;
   created_at: string;
 };
 

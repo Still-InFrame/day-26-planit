@@ -7,7 +7,8 @@ const toDollars = (c: number) => c / 100;
 export type MemberSummary = {
   member: MemberRow;
   name: string; // resolved display name (nickname or profile)
-  contributed: number; // total this member actually paid
+  contributed: number; // total this member paid that counts toward budget
+  pointsPaid: number; // value this member paid in points (documented)
   budget: number;
   remaining: number; // budget - contributed  (negative => over budget)
   over: boolean;
@@ -18,10 +19,12 @@ export type MemberSummary = {
 
 export type EventSummary = {
   perMember: MemberSummary[];
-  grandTotal: number; // everything actually spent
+  grandTotal: number; // everything spent that counts toward budget
   totalBudget: number; // sum of payer budgets
   poolRemaining: number; // totalBudget - grandTotal
   payerCount: number;
+  pointsTotal: number; // total value paid in points (documented)
+  pointsAffectBudget: boolean;
 };
 
 // Guest-of-honor members are covered, non-paying: excluded from budgets,
@@ -30,11 +33,21 @@ export function computeSummary(
   members: MemberRow[],
   contributions: ContributionRow[],
   profiles: Map<string, ProfileRow> = new Map(),
+  pointsAffectBudget = false,
 ): EventSummary {
   const contribByMember = new Map<string, number>();
+  const pointsByMember = new Map<string, number>();
   let grandTotalC = 0;
+  let pointsTotalC = 0;
   for (const c of contributions) {
     const cents = toCents(c.amount);
+    // Points are documented but excluded from the budget math unless opted in.
+    if (c.is_points && !pointsAffectBudget) {
+      pointsTotalC += cents;
+      pointsByMember.set(c.member_id, (pointsByMember.get(c.member_id) ?? 0) + cents);
+      continue;
+    }
+    if (c.is_points) pointsTotalC += cents;
     grandTotalC += cents;
     contribByMember.set(c.member_id, (contribByMember.get(c.member_id) ?? 0) + cents);
   }
@@ -63,6 +76,7 @@ export function computeSummary(
       member: m,
       name: resolveName(m, profiles),
       contributed: toDollars(contributedC),
+      pointsPaid: toDollars(pointsByMember.get(m.id) ?? 0),
       budget: toDollars(budgetC),
       remaining: toDollars(remainingC),
       over: remainingC < 0,
@@ -78,6 +92,8 @@ export function computeSummary(
     totalBudget: toDollars(totalBudgetC),
     poolRemaining: toDollars(totalBudgetC - grandTotalC),
     payerCount,
+    pointsTotal: toDollars(pointsTotalC),
+    pointsAffectBudget,
   };
 }
 

@@ -18,6 +18,7 @@ type PreviewEvent = {
   currency: string;
   is_private: boolean;
   settle_up_enabled: boolean;
+  points_affect_budget: boolean;
 };
 
 export function PreviewWorkspace({
@@ -35,7 +36,7 @@ export function PreviewWorkspace({
 }) {
   const cur = event.currency;
   const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
-  const summary = computeSummary(members, contributions, profileMap);
+  const summary = computeSummary(members, contributions, profileMap, event.points_affect_budget);
   const transfers = settleUp(summary);
   const nameById = new Map(summary.perMember.map((s) => [s.member.id, s.name]));
   const poolNeg = summary.poolRemaining < 0;
@@ -146,6 +147,9 @@ export function PreviewWorkspace({
                       <span key={c.id} className="tabular flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs">
                         <span className="font-semibold">{nameById.get(c.member_id) ?? "?"}</span>
                         <span className="text-muted">{money(Number(c.amount), cur)}</span>
+                        {c.is_points && (
+                          <span className="rounded-full bg-amber/15 px-1 py-px text-[9px] font-bold text-amber">PTS</span>
+                        )}
                       </span>
                     ))}
                   </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { computeSummary, settleUp } from "@/lib/calc";
@@ -41,6 +42,7 @@ export function EventWorkspace({
   const [contribs, setContribs] = useState(initialContribs);
   const [profiles, setProfiles] = useState(initialProfiles);
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
 
   // Editable plan settings (kept in state so changes reflect immediately).
   const [details, setDetails] = useState({
@@ -50,6 +52,7 @@ export function EventWorkspace({
     end_date: event.end_date ?? "",
     currency: event.currency,
     settle_up_enabled: event.settle_up_enabled,
+    points_affect_budget: event.points_affect_budget,
   });
   const cur = details.currency;
 
@@ -81,17 +84,13 @@ export function EventWorkspace({
   }, [supabase, event.id]);
 
   const summary = useMemo(
-    () => computeSummary(members, contribs, profileMap),
-    [members, contribs, profileMap],
+    () => computeSummary(members, contribs, profileMap, details.points_affect_budget),
+    [members, contribs, profileMap, details.points_affect_budget],
   );
   const transfers = useMemo(() => settleUp(summary), [summary]);
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
   const nameById = useMemo(
     () => new Map(summary.perMember.map((s) => [s.member.id, s.name])),
-    [summary],
-  );
-  const remainingByMember = useMemo(
-    () => new Map(summary.perMember.map((s) => [s.member.id, s.remaining])),
     [summary],
   );
 
@@ -161,6 +160,13 @@ export function EventWorkspace({
       }));
   }, [connectedUserIds, members, profileMap]);
 
+  async function deletePlan() {
+    // RLS allows only the creator to delete; cascades members/items/contributions.
+    await supabase.from("planit_events").delete().eq("id", event.id);
+    router.push("/");
+    router.refresh();
+  }
+
   async function saveSettings(next: typeof details) {
     setDetails(next);
     setSettingsOpen(false);
@@ -173,6 +179,7 @@ export function EventWorkspace({
         end_date: next.end_date || null,
         currency: next.currency,
         settle_up_enabled: next.settle_up_enabled,
+        points_affect_budget: next.points_affect_budget,
       })
       .eq("id", event.id);
     toast("Plan settings saved ✓");
@@ -275,15 +282,16 @@ export function EventWorkspace({
     await supabase.from("planit_items").delete().eq("id", id);
     reload();
   }
-  async function addContribution(itemId: string, memberId: string, amount: number) {
+  async function addContribution(itemId: string, memberId: string, amount: number, isPoints: boolean) {
     await supabase.from("planit_contributions").insert({
       event_id: event.id,
       item_id: itemId,
       member_id: memberId,
       amount,
+      is_points: isPoints,
     });
     const who = nameById.get(memberId) ?? "Someone";
-    toast(`${who} paid ${money(amount, cur)} 💸`);
+    toast(`${who} paid ${money(amount, cur)}${isPoints ? " in points ⭐" : " 💸"}`);
     reload();
   }
   async function removeContribution(id: string) {
@@ -382,7 +390,15 @@ export function EventWorkspace({
 
           <div className="mt-6 grid grid-cols-3 gap-3">
             <HeroStat label="Pool remaining" value={money(summary.poolRemaining, cur)} big warn={poolNeg} />
-            <HeroStat label="Spent" value={money(summary.grandTotal, cur)} />
+            <HeroStat
+              label="Spent"
+              value={money(summary.grandTotal, cur)}
+              sub={
+                summary.pointsTotal > 0 && !summary.pointsAffectBudget
+                  ? `+ ${money(summary.pointsTotal, cur)} in points`
+                  : undefined
+              }
+            />
             <HeroStat label="Total budget" value={money(summary.totalBudget, cur)} />
           </div>
         </div>
@@ -486,7 +502,9 @@ export function EventWorkspace({
       {settingsOpen && (
         <SettingsDialog
           initial={details}
+          canDelete={event.creator_id === currentUserId}
           onSave={saveSettings}
+          onDelete={deletePlan}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -645,9 +663,8 @@ export function EventWorkspace({
               members={members}
               memberById={memberById}
               nameById={nameById}
-              remainingByMember={remainingByMember}
               currency={cur}
-              onAddContribution={(memberId, amount) => addContribution(it.id, memberId, amount)}
+              onAddContribution={(memberId, amount, isPoints) => addContribution(it.id, memberId, amount, isPoints)}
               onRemoveContribution={removeContribution}
               onUpdate={(f) => updateItem(it.id, f)}
               onRemoveItem={() => removeItem(it.id)}
@@ -672,13 +689,14 @@ export function EventWorkspace({
 }
 
 /* ---------------------------------------------------------------------- */
-function HeroStat({ label, value, big, warn }: { label: string; value: string; big?: boolean; warn?: boolean }) {
+function HeroStat({ label, value, big, warn, sub }: { label: string; value: string; big?: boolean; warn?: boolean; sub?: string }) {
   return (
     <div className="rounded-2xl bg-white/15 px-3 py-2.5 backdrop-blur-sm">
       <div className="text-[10px] font-semibold uppercase tracking-wide text-white/70">{label}</div>
       <div className={`tabular font-bold ${big ? "text-xl sm:text-2xl" : "text-base sm:text-lg"} ${warn ? "text-amber-200" : "text-white"}`}>
         {value}
       </div>
+      {sub && <div className="tabular text-[10px] font-medium text-white/70">{sub}</div>}
     </div>
   );
 }
@@ -1110,7 +1128,6 @@ function ItemCard({
   members,
   memberById,
   nameById,
-  remainingByMember,
   currency,
   onAddContribution,
   onRemoveContribution,
@@ -1122,9 +1139,8 @@ function ItemCard({
   members: MemberRow[];
   memberById: Map<string, MemberRow>;
   nameById: Map<string, string>;
-  remainingByMember: Map<string, number>;
   currency: string;
-  onAddContribution: (memberId: string, amount: number) => void;
+  onAddContribution: (memberId: string, amount: number, isPoints: boolean) => void;
   onRemoveContribution: (id: string) => void;
   onUpdate: (fields: Partial<ItemRow>) => void;
   onRemoveItem: () => void;
@@ -1147,9 +1163,14 @@ function ItemCard({
   }
   const [memberId, setMemberId] = useState(members[0]?.id ?? "");
   const [amount, setAmount] = useState("");
+  const [payInPoints, setPayInPoints] = useState(false);
 
   const [expanded, setExpanded] = useState(false);
-  const maxForSelected = Math.max(0, Math.round((remainingByMember.get(memberId) ?? 0) * 100) / 100);
+  // Max = the item's remaining estimate (planned cost minus what's already covered).
+  const itemRemaining = Math.max(
+    0,
+    Math.round((Number(item.planned_amount) - actual) * 100) / 100,
+  );
 
   // Distinct contributors -> small colored dots in the collapsed row.
   const dotMembers = Array.from(new Set(contribs.map((c) => c.member_id)))
@@ -1159,16 +1180,18 @@ function ItemCard({
   function submit() {
     const n = parseFloat(amount);
     if (!memberId || isNaN(n)) return;
-    onAddContribution(memberId, n);
+    onAddContribution(memberId, n, payInPoints);
     setAmount("");
+    setPayInPoints(false);
     setAdding(false);
   }
 
-  // Fill + confirm the selected person's remaining budget in one tap.
+  // Fill + confirm the rest of this item's estimate in one tap.
   function submitMax() {
-    if (!memberId || maxForSelected <= 0) return;
-    onAddContribution(memberId, maxForSelected);
+    if (!memberId || itemRemaining <= 0) return;
+    onAddContribution(memberId, itemRemaining, payInPoints);
     setAmount("");
+    setPayInPoints(false);
     setAdding(false);
   }
 
@@ -1291,6 +1314,11 @@ function ItemCard({
                   />
                   <span className="font-semibold">{nameById.get(c.member_id) ?? "?"}</span>
                   <span className="text-muted">{money(Number(c.amount), currency)}</span>
+                  {c.is_points && (
+                    <span className="rounded-full bg-amber/15 px-1 py-px text-[9px] font-bold text-amber">
+                      PTS
+                    </span>
+                  )}
                   <button
                     onClick={() => onRemoveContribution(c.id)}
                     className="text-muted hover:text-rose"
@@ -1325,12 +1353,20 @@ function ItemCard({
                   className="tabular w-16 bg-transparent text-xs outline-none"
                 />
                 <button
+                  type="button"
+                  onClick={() => setPayInPoints((v) => !v)}
+                  title={payInPoints ? "Paid in points" : "Paid in cash — tap for points"}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${payInPoints ? "bg-amber/15 text-amber" : "bg-background text-muted"}`}
+                >
+                  {payInPoints ? "⭐ Pts" : "💵 Cash"}
+                </button>
+                <button
                   onClick={submitMax}
-                  disabled={maxForSelected <= 0}
+                  disabled={itemRemaining <= 0}
                   title={
-                    maxForSelected > 0
-                      ? `Add ${money(maxForSelected, currency)} (their remaining budget)`
-                      : "No budget remaining"
+                    itemRemaining > 0
+                      ? `Add ${money(itemRemaining, currency)} (rest of the estimate)`
+                      : "Add an estimate to use Max"
                   }
                   className="rounded-full bg-indigo/10 px-2 py-0.5 text-[11px] font-bold text-indigo disabled:opacity-40"
                 >
@@ -1772,18 +1808,24 @@ type Details = {
   end_date: string;
   currency: string;
   settle_up_enabled: boolean;
+  points_affect_budget: boolean;
 };
 
 function SettingsDialog({
   initial,
+  canDelete,
   onSave,
+  onDelete,
   onClose,
 }: {
   initial: Details;
+  canDelete: boolean;
   onSave: (d: Details) => void;
+  onDelete: () => void;
   onClose: () => void;
 }) {
   const [d, setD] = useState<Details>(initial);
+  const [confirmDel, setConfirmDel] = useState(false);
   const set = (patch: Partial<Details>) => setD((prev) => ({ ...prev, ...patch }));
   const input =
     "w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo focus:ring-2 focus:ring-indigo/20";
@@ -1852,6 +1894,26 @@ function SettingsDialog({
           </p>
         </div>
 
+        <div className="rounded-2xl border border-border p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold">Points count toward budget</div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={d.points_affect_budget}
+              onClick={() => set({ points_affect_budget: !d.points_affect_budget })}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition ${d.points_affect_budget ? "bg-indigo" : "bg-border"}`}
+            >
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${d.points_affect_budget ? "left-[22px]" : "left-0.5"}`} />
+            </button>
+          </div>
+          <p className="mt-1.5 text-xs text-muted">
+            Off (default): payments marked “⭐ Pts” are documented but don&apos;t affect the
+            pool, fairness, or settle-up — perfect for a flight booked on miles. On: points
+            count just like cash.
+          </p>
+        </div>
+
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold text-muted hover:text-foreground">
             Cancel
@@ -1860,6 +1922,34 @@ function SettingsDialog({
             Save
           </button>
         </div>
+
+        {/* Delete (creator only — RLS also enforces it). */}
+        {canDelete && (
+          <div className="mt-1 rounded-2xl border border-rose/30 bg-rose/5 p-3">
+            {confirmDel ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-rose">Delete this plan for everyone?</span>
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" onClick={() => setConfirmDel(false)} className="text-xs font-semibold text-muted">
+                    Cancel
+                  </button>
+                  <button type="button" onClick={onDelete} className="rounded-lg bg-rose px-3 py-1.5 text-xs font-semibold text-white">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted">
+                  Deleting removes this plan and all its activities permanently.
+                </span>
+                <button type="button" onClick={() => setConfirmDel(true)} className="shrink-0 text-xs font-semibold text-rose hover:underline">
+                  Delete plan
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </form>
     </div>
   );
