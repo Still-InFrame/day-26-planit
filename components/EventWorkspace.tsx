@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { computeSummary, settleUp } from "@/lib/calc";
-import { money, dateRange, CURRENCIES } from "@/lib/format";
+import { money, dateRange, CURRENCIES, pointsLabel } from "@/lib/format";
 import { formatPhone } from "@/lib/countries";
 import {
   CATEGORIES,
@@ -53,8 +53,10 @@ export function EventWorkspace({
     currency: event.currency,
     settle_up_enabled: event.settle_up_enabled,
     points_affect_budget: event.points_affect_budget,
+    points_per_dollar: event.points_per_dollar,
   });
   const cur = details.currency;
+  const ppd = details.points_per_dollar > 0 ? details.points_per_dollar : 100;
 
   const profileMap = useMemo(
     () => new Map(profiles.map((p) => [p.user_id, p])),
@@ -180,6 +182,7 @@ export function EventWorkspace({
         currency: next.currency,
         settle_up_enabled: next.settle_up_enabled,
         points_affect_budget: next.points_affect_budget,
+        points_per_dollar: next.points_per_dollar > 0 ? next.points_per_dollar : 100,
       })
       .eq("id", event.id);
     toast("Plan settings saved ✓");
@@ -282,16 +285,27 @@ export function EventWorkspace({
     await supabase.from("planit_items").delete().eq("id", id);
     reload();
   }
-  async function addContribution(itemId: string, memberId: string, amount: number, isPoints: boolean) {
+  async function addContribution(
+    itemId: string,
+    memberId: string,
+    amount: number,
+    isPoints: boolean,
+    points: number | null,
+  ) {
     await supabase.from("planit_contributions").insert({
       event_id: event.id,
       item_id: itemId,
       member_id: memberId,
       amount,
       is_points: isPoints,
+      points: isPoints ? points : null,
     });
     const who = nameById.get(memberId) ?? "Someone";
-    toast(`${who} paid ${money(amount, cur)}${isPoints ? " in points ⭐" : " 💸"}`);
+    toast(
+      isPoints && points != null
+        ? `${who} paid ${pointsLabel(points)} ⭐`
+        : `${who} paid ${money(amount, cur)} 💸`,
+    );
     reload();
   }
   async function removeContribution(id: string) {
@@ -664,7 +678,10 @@ export function EventWorkspace({
               memberById={memberById}
               nameById={nameById}
               currency={cur}
-              onAddContribution={(memberId, amount, isPoints) => addContribution(it.id, memberId, amount, isPoints)}
+              pointsPerDollar={ppd}
+              onAddContribution={(memberId, amount, isPoints, points) =>
+                addContribution(it.id, memberId, amount, isPoints, points)
+              }
               onRemoveContribution={removeContribution}
               onUpdate={(f) => updateItem(it.id, f)}
               onRemoveItem={() => removeItem(it.id)}
@@ -1129,6 +1146,7 @@ function ItemCard({
   memberById,
   nameById,
   currency,
+  pointsPerDollar,
   onAddContribution,
   onRemoveContribution,
   onUpdate,
@@ -1140,7 +1158,8 @@ function ItemCard({
   memberById: Map<string, MemberRow>;
   nameById: Map<string, string>;
   currency: string;
-  onAddContribution: (memberId: string, amount: number, isPoints: boolean) => void;
+  pointsPerDollar: number;
+  onAddContribution: (memberId: string, amount: number, isPoints: boolean, points: number | null) => void;
   onRemoveContribution: (id: string) => void;
   onUpdate: (fields: Partial<ItemRow>) => void;
   onRemoveItem: () => void;
@@ -1177,19 +1196,30 @@ function ItemCard({
     .map((id) => memberById.get(id))
     .filter(Boolean) as MemberRow[];
 
+  // In points mode the input holds POINTS; convert to a dollar value via the rate.
+  const ppd = pointsPerDollar > 0 ? pointsPerDollar : 100;
   function submit() {
     const n = parseFloat(amount);
     if (!memberId || isNaN(n)) return;
-    onAddContribution(memberId, n, payInPoints);
+    if (payInPoints) {
+      const dollars = Math.round((n / ppd) * 100) / 100;
+      onAddContribution(memberId, dollars, true, n);
+    } else {
+      onAddContribution(memberId, n, false, null);
+    }
     setAmount("");
     setPayInPoints(false);
     setAdding(false);
   }
 
-  // Fill + confirm the rest of this item's estimate in one tap.
+  // Fill + confirm the rest of this item's estimate in one tap (points equivalent if in points mode).
   function submitMax() {
     if (!memberId || itemRemaining <= 0) return;
-    onAddContribution(memberId, itemRemaining, payInPoints);
+    if (payInPoints) {
+      onAddContribution(memberId, itemRemaining, true, Math.round(itemRemaining * ppd));
+    } else {
+      onAddContribution(memberId, itemRemaining, false, null);
+    }
     setAmount("");
     setPayInPoints(false);
     setAdding(false);
@@ -1313,7 +1343,11 @@ function ItemCard({
                     style={{ background: m?.color ?? "#6366f1" }}
                   />
                   <span className="font-semibold">{nameById.get(c.member_id) ?? "?"}</span>
-                  <span className="text-muted">{money(Number(c.amount), currency)}</span>
+                  <span className="text-muted">
+                    {c.is_points && c.points != null
+                      ? pointsLabel(Number(c.points))
+                      : money(Number(c.amount), currency)}
+                  </span>
                   {c.is_points && (
                     <span className="rounded-full bg-amber/15 px-1 py-px text-[9px] font-bold text-amber">
                       PTS
@@ -1349,13 +1383,13 @@ function ItemCard({
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && submit()}
-                  placeholder="0.00"
-                  className="tabular w-16 bg-transparent text-xs outline-none"
+                  placeholder={payInPoints ? "110000" : "0.00"}
+                  className={`tabular bg-transparent text-xs outline-none ${payInPoints ? "w-20" : "w-16"}`}
                 />
                 <button
                   type="button"
                   onClick={() => setPayInPoints((v) => !v)}
-                  title={payInPoints ? "Paid in points" : "Paid in cash — tap for points"}
+                  title={payInPoints ? "Entering points" : "Entering cash — tap for points"}
                   className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${payInPoints ? "bg-amber/15 text-amber" : "bg-background text-muted"}`}
                 >
                   {payInPoints ? "⭐ Pts" : "💵 Cash"}
@@ -1364,9 +1398,11 @@ function ItemCard({
                   onClick={submitMax}
                   disabled={itemRemaining <= 0}
                   title={
-                    itemRemaining > 0
-                      ? `Add ${money(itemRemaining, currency)} (rest of the estimate)`
-                      : "Add an estimate to use Max"
+                    itemRemaining <= 0
+                      ? "Add an estimate to use Max"
+                      : payInPoints
+                        ? `Add ${pointsLabel(itemRemaining * ppd)} (rest of the estimate)`
+                        : `Add ${money(itemRemaining, currency)} (rest of the estimate)`
                   }
                   className="rounded-full bg-indigo/10 px-2 py-0.5 text-[11px] font-bold text-indigo disabled:opacity-40"
                 >
@@ -1809,6 +1845,7 @@ type Details = {
   currency: string;
   settle_up_enabled: boolean;
   points_affect_budget: boolean;
+  points_per_dollar: number;
 };
 
 function SettingsDialog({
@@ -1911,6 +1948,21 @@ function SettingsDialog({
             Off (default): payments marked “⭐ Pts” are documented but don&apos;t affect the
             pool, fairness, or settle-up — perfect for a flight booked on miles. On: points
             count just like cash.
+          </p>
+
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+            <label className="text-sm font-semibold">Points per $1</label>
+            <input
+              type="number"
+              min={1}
+              value={d.points_per_dollar}
+              onChange={(e) => set({ points_per_dollar: Number(e.target.value) })}
+              className="tabular w-28 rounded-lg border border-border bg-surface px-2 py-1.5 text-right text-sm outline-none focus:border-indigo"
+            />
+          </div>
+          <p className="mt-1.5 text-xs text-muted">
+            Conversion for points payments. Default 100 — i.e. 100 points = $1, so 110,000
+            points = $1,100.
           </p>
         </div>
 

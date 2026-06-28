@@ -12,6 +12,7 @@ export type EventRow = {
   is_private: boolean;
   settle_up_enabled: boolean;
   points_affect_budget: boolean;
+  points_per_dollar: number;
   invite_token: string;
   created_at: string;
 };
@@ -75,8 +76,9 @@ export type ContributionRow = {
   event_id: string;
   item_id: string;
   member_id: string;
-  amount: number;
+  amount: number; // dollar value (frozen at entry)
   is_points: boolean;
+  points: number | null; // raw points count when is_points
   created_at: string;
 };
 

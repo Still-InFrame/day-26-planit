@@ -1,5 +1,5 @@
 import { computeSummary, settleUp } from "@/lib/calc";
-import { money, dateRange } from "@/lib/format";
+import { money, dateRange, pointsLabel } from "@/lib/format";
 import {
   resolveName,
   categoryMeta,
@@ -146,7 +146,9 @@ export function PreviewWorkspace({
                     {cs.map((c) => (
                       <span key={c.id} className="tabular flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs">
                         <span className="font-semibold">{nameById.get(c.member_id) ?? "?"}</span>
-                        <span className="text-muted">{money(Number(c.amount), cur)}</span>
+                        <span className="text-muted">
+                          {c.is_points && c.points != null ? pointsLabel(Number(c.points)) : money(Number(c.amount), cur)}
+                        </span>
                         {c.is_points && (
                           <span className="rounded-full bg-amber/15 px-1 py-px text-[9px] font-bold text-amber">PTS</span>
                         )}

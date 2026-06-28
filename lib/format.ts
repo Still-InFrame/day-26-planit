@@ -31,4 +31,8 @@ export function dateRange(start: string | null, end: string | null): string {
   return withYear((start ?? end) as string);
 }
 
+export function pointsLabel(n: number): string {
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n || 0)} pts`;
+}
+
 export const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "JPY", "MXN"] as const;
