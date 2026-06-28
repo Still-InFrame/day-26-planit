@@ -270,12 +270,13 @@ export function EventWorkspace({
     await supabase.from("planit_members").delete().eq("id", id);
     reload();
   }
-  async function addItem(label: string, category: string, planned: number) {
+  async function addItem(label: string, category: string, planned: number, ptsRate: number | null) {
     await supabase.from("planit_items").insert({
       event_id: event.id,
       label,
       category,
       planned_amount: planned,
+      points_per_dollar: ptsRate,
       sort_order: items.length,
     });
     toast(`Added “${label}”`);
@@ -601,7 +602,7 @@ export function EventWorkspace({
         }
       >
         <div className="space-y-2.5">
-          <AddItemRow onAdd={addItem} />
+          <AddItemRow onAdd={addItem} planPointsPerDollar={ppd} />
 
           {filtersOpen && items.length > 1 && (
             <div className="planit-pop flex flex-wrap items-center gap-2 rounded-2xl border border-indigo/40 bg-indigo/5 p-2">
@@ -1171,12 +1172,14 @@ function ItemCard({
   const [eLabel, setELabel] = useState(item.label);
   const [eCategory, setECategory] = useState(item.category);
   const [ePlanned, setEPlanned] = useState(String(item.planned_amount || ""));
+  const [ePtsRate, setEPtsRate] = useState(item.points_per_dollar != null ? String(item.points_per_dollar) : "");
   function saveEdit() {
     if (!eLabel.trim()) return;
     onUpdate({
       label: eLabel.trim(),
       category: eCategory,
       planned_amount: parseFloat(ePlanned) || 0,
+      points_per_dollar: ePtsRate.trim() ? Number(ePtsRate) : null,
     });
     setEditing(false);
   }
@@ -1197,7 +1200,13 @@ function ItemCard({
     .filter(Boolean) as MemberRow[];
 
   // In points mode the input holds POINTS; convert to a dollar value via the rate.
-  const ppd = pointsPerDollar > 0 ? pointsPerDollar : 100;
+  // Per-item rate wins (different cards), else the plan default.
+  const ppd =
+    item.points_per_dollar && item.points_per_dollar > 0
+      ? item.points_per_dollar
+      : pointsPerDollar > 0
+        ? pointsPerDollar
+        : 100;
   function submit() {
     const n = parseFloat(amount);
     if (!memberId || isNaN(n)) return;
@@ -1308,8 +1317,20 @@ function ItemCard({
                   className="tabular w-24 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-muted">Points per $1 (this item&apos;s card)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={ePtsRate}
+                  onChange={(e) => setEPtsRate(e.target.value)}
+                  placeholder={`plan: ${pointsPerDollar}`}
+                  onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                  className="tabular w-24 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
+                />
+              </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); }} className="text-xs font-semibold text-muted">
+                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); }} className="text-xs font-semibold text-muted">
                   Cancel
                 </button>
                 <button onClick={saveEdit} className="planit-gradient rounded-lg px-3 py-1.5 text-xs font-semibold text-white">
@@ -1446,17 +1467,25 @@ function ItemCard({
   );
 }
 
-function AddItemRow({ onAdd }: { onAdd: (label: string, category: string, planned: number) => void }) {
+function AddItemRow({
+  onAdd,
+  planPointsPerDollar,
+}: {
+  onAdd: (label: string, category: string, planned: number, ptsRate: number | null) => void;
+  planPointsPerDollar: number;
+}) {
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState("other");
   const [planned, setPlanned] = useState("");
+  const [ptsRate, setPtsRate] = useState("");
 
   function submit() {
     if (!label.trim()) return;
-    onAdd(label.trim(), category, parseFloat(planned) || 0);
+    onAdd(label.trim(), category, parseFloat(planned) || 0, ptsRate.trim() ? Number(ptsRate) : null);
     setLabel("");
     setPlanned("");
     setCategory("other");
+    setPtsRate("");
   }
 
   return (
@@ -1484,6 +1513,16 @@ function AddItemRow({ onAdd }: { onAdd: (label: string, category: string, planne
         value={planned}
         onChange={(e) => setPlanned(e.target.value)}
         placeholder="est. $"
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        className="tabular w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo"
+      />
+      <input
+        type="number"
+        min={1}
+        value={ptsRate}
+        onChange={(e) => setPtsRate(e.target.value)}
+        placeholder={`${planPointsPerDollar} pts/$`}
+        title="Points per $1 for this item (leave blank to use the plan default)"
         onKeyDown={(e) => e.key === "Enter" && submit()}
         className="tabular w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo"
       />
