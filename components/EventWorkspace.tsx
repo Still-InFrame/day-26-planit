@@ -134,8 +134,35 @@ export function EventWorkspace({
     if (itemSort === "amount_desc") arr.sort((a, b) => (itemTotals.get(b.id) ?? 0) - (itemTotals.get(a.id) ?? 0));
     else if (itemSort === "amount_asc") arr.sort((a, b) => (itemTotals.get(a.id) ?? 0) - (itemTotals.get(b.id) ?? 0));
     else if (itemSort === "name") arr.sort((a, b) => a.label.localeCompare(b.label));
-    return arr; // "added" keeps the natural order
+    else if (itemSort === "date")
+      arr.sort((a, b) => {
+        // by start date ascending, undated last
+        if (!a.item_date && !b.item_date) return 0;
+        if (!a.item_date) return 1;
+        if (!b.item_date) return -1;
+        return a.item_date < b.item_date ? -1 : a.item_date > b.item_date ? 1 : 0;
+      });
+    return arr; // "added" keeps the manual (sort_order) order — drag-reorderable
   }, [filteredItems, itemSort, itemTotals]);
+  // Manual drag-reorder only makes sense in the natural order with no filters.
+  const dragEnabled =
+    itemSort === "added" && !itemSearch.trim() && itemCategory === "all" && itemMember === "all";
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  async function reorderItems(fromId: string, toId: string) {
+    if (fromId === toId) return;
+    const arr = [...items];
+    const from = arr.findIndex((i) => i.id === fromId);
+    const to = arr.findIndex((i) => i.id === toId);
+    if (from < 0 || to < 0) return;
+    const [moved] = arr.splice(from, 1);
+    arr.splice(to, 0, moved);
+    const renumbered = arr.map((it, idx) => ({ ...it, sort_order: idx }));
+    setItems(renumbered);
+    await Promise.all(
+      renumbered.map((it, idx) => supabase.from("planit_items").update({ sort_order: idx }).eq("id", it.id)),
+    );
+  }
   const usedCategories = useMemo(
     () => new Set(items.map((it) => it.category)),
     [items],
@@ -270,13 +297,22 @@ export function EventWorkspace({
     await supabase.from("planit_members").delete().eq("id", id);
     reload();
   }
-  async function addItem(label: string, category: string, planned: number, ptsRate: number | null) {
+  async function addItem(
+    label: string,
+    category: string,
+    planned: number,
+    ptsRate: number | null,
+    startDate: string | null,
+    endDate: string | null,
+  ) {
     await supabase.from("planit_items").insert({
       event_id: event.id,
       label,
       category,
       planned_amount: planned,
       points_per_dollar: ptsRate,
+      item_date: startDate,
+      item_end_date: startDate ? endDate : null,
       sort_order: items.length,
     });
     toast(`Added “${label}”`);
@@ -574,7 +610,8 @@ export function EventWorkspace({
                 className="rounded-full border border-border bg-surface px-2.5 py-1.5 text-xs font-semibold text-muted outline-none transition hover:text-foreground focus:border-indigo"
                 aria-label="Sort activities"
               >
-                <option value="added">Sort: Added</option>
+                <option value="added">Sort: Manual</option>
+                <option value="date">By date</option>
                 <option value="amount_desc">$ High → Low</option>
                 <option value="amount_asc">$ Low → High</option>
                 <option value="name">Name A → Z</option>
@@ -680,6 +717,13 @@ export function EventWorkspace({
               nameById={nameById}
               currency={cur}
               pointsPerDollar={ppd}
+              dragEnabled={dragEnabled}
+              isDragging={dragId === it.id}
+              onDragStartItem={() => setDragId(it.id)}
+              onDropItem={() => {
+                if (dragId) reorderItems(dragId, it.id);
+                setDragId(null);
+              }}
               onAddContribution={(memberId, amount, isPoints, points) =>
                 addContribution(it.id, memberId, amount, isPoints, points)
               }
@@ -1148,6 +1192,10 @@ function ItemCard({
   nameById,
   currency,
   pointsPerDollar,
+  dragEnabled,
+  isDragging,
+  onDragStartItem,
+  onDropItem,
   onAddContribution,
   onRemoveContribution,
   onUpdate,
@@ -1160,6 +1208,10 @@ function ItemCard({
   nameById: Map<string, string>;
   currency: string;
   pointsPerDollar: number;
+  dragEnabled: boolean;
+  isDragging: boolean;
+  onDragStartItem: () => void;
+  onDropItem: () => void;
   onAddContribution: (memberId: string, amount: number, isPoints: boolean, points: number | null) => void;
   onRemoveContribution: (id: string) => void;
   onUpdate: (fields: Partial<ItemRow>) => void;
@@ -1173,6 +1225,8 @@ function ItemCard({
   const [eCategory, setECategory] = useState(item.category);
   const [ePlanned, setEPlanned] = useState(String(item.planned_amount || ""));
   const [ePtsRate, setEPtsRate] = useState(item.points_per_dollar != null ? String(item.points_per_dollar) : "");
+  const [eStart, setEStart] = useState(item.item_date ?? "");
+  const [eEnd, setEEnd] = useState(item.item_end_date ?? "");
   function saveEdit() {
     if (!eLabel.trim()) return;
     onUpdate({
@@ -1180,6 +1234,8 @@ function ItemCard({
       category: eCategory,
       planned_amount: parseFloat(ePlanned) || 0,
       points_per_dollar: ePtsRate.trim() ? Number(ePtsRate) : null,
+      item_date: eStart || null,
+      item_end_date: eStart && eEnd ? eEnd : null, // end only valid with a start
     });
     setEditing(false);
   }
@@ -1235,20 +1291,42 @@ function ItemCard({
   }
 
   return (
-    <div className="group overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition hover:shadow-md">
+    <div
+      onDragOver={dragEnabled ? (e) => e.preventDefault() : undefined}
+      onDrop={dragEnabled ? onDropItem : undefined}
+      className={`group overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition hover:shadow-md ${isDragging ? "opacity-40" : ""}`}
+    >
       {/* Compact header — tap to expand */}
       <div
         role="button"
         tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setExpanded((v) => !v)}
-        className="flex cursor-pointer items-center gap-3 p-3"
+        className="flex cursor-pointer items-center gap-2 p-3"
       >
+        {dragEnabled && (
+          <span
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", item.id);
+              onDragStartItem();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title="Drag to reorder"
+            className="shrink-0 cursor-grab select-none px-0.5 text-muted active:cursor-grabbing"
+          >
+            ⠿
+          </span>
+        )}
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background text-base">
           {meta.emoji}
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold leading-tight">{item.label}</div>
+          {item.item_date && (
+            <div className="text-[11px] text-muted">📅 {dateRange(item.item_date, item.item_end_date)}</div>
+          )}
           {!expanded &&
             (dotMembers.length > 0 ? (
               <div className="mt-0.5 flex items-center gap-1">
@@ -1329,8 +1407,27 @@ function ItemCard({
                   className="tabular w-24 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
                 />
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-[11px] text-muted">Dates</label>
+                <input
+                  type="date"
+                  value={eStart}
+                  onChange={(e) => { setEStart(e.target.value); if (!e.target.value) setEEnd(""); }}
+                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
+                />
+                <span className="text-xs text-muted">to</span>
+                <input
+                  type="date"
+                  value={eEnd}
+                  min={eStart || undefined}
+                  disabled={!eStart}
+                  onChange={(e) => setEEnd(e.target.value)}
+                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo disabled:opacity-50"
+                  title={eStart ? "End date (optional)" : "Set a start date first"}
+                />
+              </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); }} className="text-xs font-semibold text-muted">
+                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); setEStart(item.item_date ?? ""); setEEnd(item.item_end_date ?? ""); }} className="text-xs font-semibold text-muted">
                   Cancel
                 </button>
                 <button onClick={saveEdit} className="planit-gradient rounded-lg px-3 py-1.5 text-xs font-semibold text-white">
@@ -1471,21 +1568,39 @@ function AddItemRow({
   onAdd,
   planPointsPerDollar,
 }: {
-  onAdd: (label: string, category: string, planned: number, ptsRate: number | null) => void;
+  onAdd: (
+    label: string,
+    category: string,
+    planned: number,
+    ptsRate: number | null,
+    startDate: string | null,
+    endDate: string | null,
+  ) => void;
   planPointsPerDollar: number;
 }) {
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState("other");
   const [planned, setPlanned] = useState("");
   const [ptsRate, setPtsRate] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
 
   function submit() {
     if (!label.trim()) return;
-    onAdd(label.trim(), category, parseFloat(planned) || 0, ptsRate.trim() ? Number(ptsRate) : null);
+    onAdd(
+      label.trim(),
+      category,
+      parseFloat(planned) || 0,
+      ptsRate.trim() ? Number(ptsRate) : null,
+      start || null,
+      end || null,
+    );
     setLabel("");
     setPlanned("");
     setCategory("other");
     setPtsRate("");
+    setStart("");
+    setEnd("");
   }
 
   return (
@@ -1525,6 +1640,22 @@ function AddItemRow({
         title="Points per $1 for this item (leave blank to use the plan default)"
         onKeyDown={(e) => e.key === "Enter" && submit()}
         className="tabular w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo"
+      />
+      <input
+        type="date"
+        value={start}
+        onChange={(e) => { setStart(e.target.value); if (!e.target.value) setEnd(""); }}
+        title="Start date"
+        className="rounded-lg border border-border bg-surface px-2 py-2 text-sm outline-none focus:border-indigo"
+      />
+      <input
+        type="date"
+        value={end}
+        min={start || undefined}
+        disabled={!start}
+        onChange={(e) => setEnd(e.target.value)}
+        title={start ? "End date (optional)" : "Set a start date first"}
+        className="rounded-lg border border-border bg-surface px-2 py-2 text-sm outline-none focus:border-indigo disabled:opacity-50"
       />
       <button
         onClick={submit}

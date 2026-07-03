@@ -139,7 +139,12 @@ export function PreviewWorkspace({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="truncate font-semibold">{it.label}</h3>
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold">{it.label}</h3>
+                      {it.item_date && (
+                        <div className="text-[11px] text-muted">📅 {dateRange(it.item_date, it.item_end_date)}</div>
+                      )}
+                    </div>
                     <span className="tabular shrink-0 font-bold">{money(actual, cur)}</span>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">

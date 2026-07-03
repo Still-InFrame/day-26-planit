@@ -67,7 +67,8 @@ export type ItemRow = {
   category: string;
   planned_amount: number;
   points_per_dollar: number | null; // per-item points rate; null => use plan default
-  item_date: string | null;
+  item_date: string | null; // start date
+  item_end_date: string | null; // optional end date
   sort_order: number;
   created_at: string;
 };
