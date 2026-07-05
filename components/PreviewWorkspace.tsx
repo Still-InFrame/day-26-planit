@@ -142,7 +142,9 @@ export function PreviewWorkspace({
                     <div className="min-w-0">
                       <h3 className="truncate font-semibold">{it.label}</h3>
                       {it.item_date && (
-                        <div className="text-[11px] text-muted">📅 {dateRange(it.item_date, it.item_end_date)}</div>
+                        <div className="text-[11px] text-muted">
+                          📅 {dateRange(it.item_date, it.item_end_date, { weekday: true })}
+                        </div>
                       )}
                     </div>
                     <span className="tabular shrink-0 font-bold">{money(actual, cur)}</span>

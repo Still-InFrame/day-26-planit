@@ -1351,7 +1351,9 @@ function ItemCard({
         <div className="min-w-0 flex-1">
           <div className="truncate font-semibold leading-tight">{item.label}</div>
           {item.item_date && (
-            <div className="text-[11px] text-muted">📅 {dateRange(item.item_date, item.item_end_date)}</div>
+            <div className="text-[11px] text-muted">
+              📅 {dateRange(item.item_date, item.item_end_date, { weekday: true })}
+            </div>
           )}
           {!expanded &&
             (dotMembers.length > 0 ? (

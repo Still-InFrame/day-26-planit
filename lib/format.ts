@@ -12,13 +12,18 @@ export function money(amount: number, currency = "USD"): string {
   }
 }
 
-export function dateRange(start: string | null, end: string | null): string {
+export function dateRange(
+  start: string | null,
+  end: string | null,
+  opts?: { weekday?: boolean },
+): string {
   if (!start && !end) return "Dates TBD";
+  const wd = opts?.weekday ? { weekday: "short" as const } : {};
   const d = (s: string) => new Date(s + "T00:00:00");
   const withYear = (s: string) =>
-    d(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    d(s).toLocaleDateString("en-US", { ...wd, month: "short", day: "numeric", year: "numeric" });
   const noYear = (s: string) =>
-    d(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    d(s).toLocaleDateString("en-US", { ...wd, month: "short", day: "numeric" });
 
   if (start && end) {
     const sameYear = d(start).getFullYear() === d(end).getFullYear();
