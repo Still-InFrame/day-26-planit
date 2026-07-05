@@ -3,6 +3,22 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase/client";
 import { computeSummary, settleUp } from "@/lib/calc";
 import { money, dateRange, CURRENCIES, pointsLabel } from "@/lib/format";
@@ -147,7 +163,15 @@ export function EventWorkspace({
   // Manual drag-reorder only makes sense in the natural order with no filters.
   const dragEnabled =
     itemSort === "added" && !itemSearch.trim() && itemCategory === "all" && itemMember === "all";
-  const [dragId, setDragId] = useState<string | null>(null);
+  // Pointer sensor works for mouse AND touch; distance guard so taps/scrolls don't drag.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (over && active.id !== over.id) reorderItems(String(active.id), String(over.id));
+  }
 
   async function reorderItems(fromId: string, toId: string) {
     if (fromId === toId) return;
@@ -707,31 +731,31 @@ export function EventWorkspace({
             </div>
           )}
 
-          {sortedItems.map((it) => (
-            <ItemCard
-              key={it.id}
-              item={it}
-              contribs={contribs.filter((c) => c.item_id === it.id)}
-              members={members}
-              memberById={memberById}
-              nameById={nameById}
-              currency={cur}
-              pointsPerDollar={ppd}
-              dragEnabled={dragEnabled}
-              isDragging={dragId === it.id}
-              onDragStartItem={() => setDragId(it.id)}
-              onDropItem={() => {
-                if (dragId) reorderItems(dragId, it.id);
-                setDragId(null);
-              }}
-              onAddContribution={(memberId, amount, isPoints, points) =>
-                addContribution(it.id, memberId, amount, isPoints, points)
-              }
-              onRemoveContribution={removeContribution}
-              onUpdate={(f) => updateItem(it.id, f)}
-              onRemoveItem={() => removeItem(it.id)}
-            />
-          ))}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={sortedItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2.5">
+                {sortedItems.map((it) => (
+                  <ItemCard
+                    key={it.id}
+                    item={it}
+                    contribs={contribs.filter((c) => c.item_id === it.id)}
+                    members={members}
+                    memberById={memberById}
+                    nameById={nameById}
+                    currency={cur}
+                    pointsPerDollar={ppd}
+                    dragEnabled={dragEnabled}
+                    onAddContribution={(memberId, amount, isPoints, points) =>
+                      addContribution(it.id, memberId, amount, isPoints, points)
+                    }
+                    onRemoveContribution={removeContribution}
+                    onUpdate={(f) => updateItem(it.id, f)}
+                    onRemoveItem={() => removeItem(it.id)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       </Section>
 
@@ -1193,9 +1217,6 @@ function ItemCard({
   currency,
   pointsPerDollar,
   dragEnabled,
-  isDragging,
-  onDragStartItem,
-  onDropItem,
   onAddContribution,
   onRemoveContribution,
   onUpdate,
@@ -1209,9 +1230,6 @@ function ItemCard({
   currency: string;
   pointsPerDollar: number;
   dragEnabled: boolean;
-  isDragging: boolean;
-  onDragStartItem: () => void;
-  onDropItem: () => void;
   onAddContribution: (memberId: string, amount: number, isPoints: boolean, points: number | null) => void;
   onRemoveContribution: (id: string) => void;
   onUpdate: (fields: Partial<ItemRow>) => void;
@@ -1219,6 +1237,12 @@ function ItemCard({
 }) {
   const meta = categoryMeta(item.category);
   const actual = contribs.reduce((s, c) => s + Number(c.amount), 0);
+  // Sortable (mouse + touch + keyboard) — disabled unless in manual/unfiltered order.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+    disabled: !dragEnabled,
+  });
+  const sortableStyle = { transform: CSS.Transform.toString(transform), transition };
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   const [eLabel, setELabel] = useState(item.label);
@@ -1292,9 +1316,9 @@ function ItemCard({
 
   return (
     <div
-      onDragOver={dragEnabled ? (e) => e.preventDefault() : undefined}
-      onDrop={dragEnabled ? onDropItem : undefined}
-      className={`group overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition hover:shadow-md ${isDragging ? "opacity-40" : ""}`}
+      ref={setNodeRef}
+      style={sortableStyle}
+      className={`group overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition hover:shadow-md ${isDragging ? "z-10 opacity-70 shadow-lg" : ""}`}
     >
       {/* Compact header — tap to expand */}
       <div
@@ -1306,15 +1330,11 @@ function ItemCard({
       >
         {dragEnabled && (
           <span
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", item.id);
-              onDragStartItem();
-            }}
+            {...attributes}
+            {...listeners}
             onClick={(e) => e.stopPropagation()}
             title="Drag to reorder"
-            className="shrink-0 cursor-grab select-none px-0.5 text-muted active:cursor-grabbing"
+            className="shrink-0 cursor-grab touch-none select-none px-0.5 text-muted active:cursor-grabbing"
           >
             ⠿
           </span>
