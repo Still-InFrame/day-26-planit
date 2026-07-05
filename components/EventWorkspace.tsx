@@ -1318,7 +1318,7 @@ function ItemCard({
     <div
       ref={setNodeRef}
       style={sortableStyle}
-      className={`group overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition hover:shadow-md ${isDragging ? "z-10 opacity-70 shadow-lg" : ""}`}
+      className={`group overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition-shadow hover:shadow-md ${isDragging ? "z-10 shadow-lg" : ""}`}
     >
       {/* Compact header — tap to expand */}
       <div
