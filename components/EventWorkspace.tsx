@@ -463,8 +463,14 @@ export function EventWorkspace({
             </p>
           )}
 
-          <div className="mt-6 grid grid-cols-3 gap-3">
-            <HeroStat label="Pool remaining" value={money(summary.poolRemaining, cur)} big warn={poolNeg} />
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <HeroStat
+              label="Pool remaining"
+              value={money(summary.poolRemaining, cur)}
+              big
+              warn={poolNeg}
+              className="col-span-2 sm:col-span-1"
+            />
             <HeroStat
               label="Spent"
               value={money(summary.grandTotal, cur)}
@@ -775,9 +781,9 @@ export function EventWorkspace({
 }
 
 /* ---------------------------------------------------------------------- */
-function HeroStat({ label, value, big, warn, sub }: { label: string; value: string; big?: boolean; warn?: boolean; sub?: string }) {
+function HeroStat({ label, value, big, warn, sub, className }: { label: string; value: string; big?: boolean; warn?: boolean; sub?: string; className?: string }) {
   return (
-    <div className="rounded-2xl bg-white/15 px-3 py-2.5 backdrop-blur-sm">
+    <div className={`rounded-2xl bg-white/15 px-3 py-2.5 backdrop-blur-sm ${className ?? ""}`}>
       <div className="text-[10px] font-semibold uppercase tracking-wide text-white/70">{label}</div>
       <div className={`tabular font-bold ${big ? "text-xl sm:text-2xl" : "text-base sm:text-lg"} ${warn ? "text-amber-200" : "text-white"}`}>
         {value}
@@ -1604,6 +1610,7 @@ function AddItemRow({
   const [ptsRate, setPtsRate] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   function submit() {
     if (!label.trim()) return;
@@ -1621,70 +1628,121 @@ function AddItemRow({
     setPtsRate("");
     setStart("");
     setEnd("");
+    setMobileOpen(false);
+  }
+
+  const field = "rounded-lg border border-border bg-surface text-sm outline-none focus:border-indigo";
+  function fields(stacked: boolean) {
+    return (
+      <>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className={`${field} px-2 py-2 ${stacked ? "w-full" : ""}`}
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.emoji} {c.label}
+            </option>
+          ))}
+        </select>
+        <input
+          autoFocus={stacked}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Add an activity (e.g. Wine Train)"
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className={`${field} px-3 py-2 ${stacked ? "w-full" : "min-w-[160px] flex-1"}`}
+        />
+        <input
+          type="number"
+          value={planned}
+          onChange={(e) => setPlanned(e.target.value)}
+          placeholder="est. $"
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className={`${field} tabular px-3 py-2 ${stacked ? "w-full" : "w-24"}`}
+        />
+        <input
+          type="number"
+          min={1}
+          value={ptsRate}
+          onChange={(e) => setPtsRate(e.target.value)}
+          placeholder={`${planPointsPerDollar} pts/$`}
+          title="Points per $1 for this item (leave blank to use the plan default)"
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className={`${field} tabular px-3 py-2 ${stacked ? "w-full" : "w-24"}`}
+        />
+        <div className={stacked ? "flex gap-2" : "contents"}>
+          <input
+            type="date"
+            value={start}
+            onChange={(e) => { setStart(e.target.value); if (!e.target.value) setEnd(""); }}
+            title="Start date"
+            className={`${field} px-2 py-2 ${stacked ? "flex-1" : ""}`}
+          />
+          <input
+            type="date"
+            value={end}
+            min={start || undefined}
+            disabled={!start}
+            onChange={(e) => setEnd(e.target.value)}
+            title={start ? "End date (optional)" : "Set a start date first"}
+            className={`${field} px-2 py-2 disabled:opacity-50 ${stacked ? "flex-1" : ""}`}
+          />
+        </div>
+      </>
+    );
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-border bg-surface/60 p-3">
-      <select
-        value={category}
-        onChange={(e) => setCategory(e.target.value)}
-        className="rounded-lg border border-border bg-surface px-2 py-2 text-sm outline-none focus:border-indigo"
-      >
-        {CATEGORIES.map((c) => (
-          <option key={c.key} value={c.key}>
-            {c.emoji} {c.label}
-          </option>
-        ))}
-      </select>
-      <input
-        value={label}
-        onChange={(e) => setLabel(e.target.value)}
-        placeholder="Add an activity (e.g. Wine Train)"
-        onKeyDown={(e) => e.key === "Enter" && submit()}
-        className="min-w-[160px] flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo"
-      />
-      <input
-        type="number"
-        value={planned}
-        onChange={(e) => setPlanned(e.target.value)}
-        placeholder="est. $"
-        onKeyDown={(e) => e.key === "Enter" && submit()}
-        className="tabular w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo"
-      />
-      <input
-        type="number"
-        min={1}
-        value={ptsRate}
-        onChange={(e) => setPtsRate(e.target.value)}
-        placeholder={`${planPointsPerDollar} pts/$`}
-        title="Points per $1 for this item (leave blank to use the plan default)"
-        onKeyDown={(e) => e.key === "Enter" && submit()}
-        className="tabular w-24 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-indigo"
-      />
-      <input
-        type="date"
-        value={start}
-        onChange={(e) => { setStart(e.target.value); if (!e.target.value) setEnd(""); }}
-        title="Start date"
-        className="rounded-lg border border-border bg-surface px-2 py-2 text-sm outline-none focus:border-indigo"
-      />
-      <input
-        type="date"
-        value={end}
-        min={start || undefined}
-        disabled={!start}
-        onChange={(e) => setEnd(e.target.value)}
-        title={start ? "End date (optional)" : "Set a start date first"}
-        className="rounded-lg border border-border bg-surface px-2 py-2 text-sm outline-none focus:border-indigo disabled:opacity-50"
-      />
+    <>
+      {/* Desktop: inline row */}
+      <div className="hidden flex-wrap items-center gap-2 rounded-2xl border border-dashed border-border bg-surface/60 p-3 sm:flex">
+        {fields(false)}
+        <button
+          onClick={submit}
+          disabled={!label.trim()}
+          className="planit-gradient rounded-lg px-4 py-2 text-sm font-semibold text-white transition active:scale-95 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </div>
+
+      {/* Mobile: button that opens a popup form */}
       <button
-        onClick={submit}
-        disabled={!label.trim()}
-        className="planit-gradient rounded-lg px-4 py-2 text-sm font-semibold text-white transition active:scale-95 disabled:opacity-50"
+        onClick={() => setMobileOpen(true)}
+        className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-dashed border-border bg-surface/60 p-3 text-sm font-semibold text-muted transition hover:border-indigo hover:text-indigo sm:hidden"
       >
-        Add
+        <span className="text-base leading-none">＋</span> Add activity
       </button>
-    </div>
+
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-3 backdrop-blur-sm sm:hidden"
+          onClick={() => setMobileOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="planit-pop w-full max-w-md space-y-2.5 rounded-3xl border border-border bg-surface p-5 shadow-2xl"
+          >
+            <h2 className="text-base font-bold">New activity</h2>
+            {fields(true)}
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setMobileOpen(false)} className="rounded-xl px-4 py-2 text-sm font-semibold text-muted">
+                Cancel
+              </button>
+              <button
+                onClick={submit}
+                disabled={!label.trim()}
+                className="planit-gradient rounded-xl px-5 py-2 text-sm font-semibold text-white transition active:scale-95 disabled:opacity-50"
+              >
+                Add activity
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
