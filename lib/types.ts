@@ -13,6 +13,8 @@ export type EventRow = {
   settle_up_enabled: boolean;
   points_affect_budget: boolean;
   points_per_dollar: number;
+  website_url: string | null;
+  preview_image_url: string | null; // og:image resolved from website_url at save time
   invite_token: string;
   created_at: string;
 };

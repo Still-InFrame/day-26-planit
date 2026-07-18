@@ -178,6 +178,15 @@ function PlanCard({
       href={`/events/${ev.id}`}
       className={`group relative overflow-hidden rounded-3xl border border-border bg-surface p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo/10 ${past ? "opacity-80 hover:opacity-100" : ""}`}
     >
+      {/* Preview image resolved from the plan's website (og:image). */}
+      {ev.preview_image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={ev.preview_image_url}
+          alt=""
+          className="-mx-5 -mt-5 mb-4 h-28 w-[calc(100%+2.5rem)] max-w-none object-cover"
+        />
+      )}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-lg font-bold">{ev.name}</h3>

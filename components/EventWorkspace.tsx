@@ -64,6 +64,7 @@ export function EventWorkspace({
   const [details, setDetails] = useState({
     name: event.name,
     destination: event.destination ?? "",
+    website: event.website_url ?? "",
     start_date: event.start_date ?? "",
     end_date: event.end_date ?? "",
     currency: event.currency,
@@ -121,6 +122,8 @@ export function EventWorkspace({
   const [itemCategory, setItemCategory] = useState("all");
   const [itemMember, setItemMember] = useState("all");
   const [itemPaid, setItemPaid] = useState("all"); // all | unpaid | paid
+  const [itemView, setItemView] = useState<"list" | "calendar">("list");
+  const [calItemId, setCalItemId] = useState<string | null>(null); // item opened from the calendar
   const [itemSort, setItemSort] = useState("added");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const itemTotals = useMemo(() => {
@@ -239,13 +242,41 @@ export function EventWorkspace({
   }
 
   async function saveSettings(next: typeof details) {
-    setDetails(next);
+    // Bare domains are fine — assume https.
+    const site = next.website.trim()
+      ? /^https?:\/\//i.test(next.website.trim())
+        ? next.website.trim()
+        : `https://${next.website.trim()}`
+      : null;
+    const websiteChanged = site !== (details.website.trim() || null);
+    setDetails({ ...next, website: site ?? "" });
     setSettingsOpen(false);
+
+    // Re-resolve the preview image only when the website actually changed.
+    let preview: string | null | undefined;
+    if (websiteChanged) {
+      preview = null;
+      if (site) {
+        try {
+          const r = await fetch("/api/link-preview", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ url: site }),
+          });
+          preview = (await r.json()).image ?? null;
+        } catch {
+          /* no image found — dashboard card keeps its default look */
+        }
+      }
+    }
+
     await supabase
       .from("planit_events")
       .update({
         name: next.name.trim() || details.name,
         destination: next.destination.trim() || null,
+        website_url: site,
+        ...(preview !== undefined ? { preview_image_url: preview } : {}),
         start_date: next.start_date || null,
         end_date: next.end_date || null,
         currency: next.currency,
@@ -254,7 +285,13 @@ export function EventWorkspace({
         points_per_dollar: next.points_per_dollar > 0 ? next.points_per_dollar : 100,
       })
       .eq("id", event.id);
-    toast("Plan settings saved ✓");
+    toast(
+      websiteChanged && site
+        ? preview
+          ? "Saved — preview image found 🖼️"
+          : "Saved — no preview image on that site"
+        : "Plan settings saved ✓",
+    );
   }
 
   async function setPrivacy(next: boolean) {
@@ -436,6 +473,19 @@ export function EventWorkspace({
               <p className="mt-1 text-sm text-white/80">
                 {details.destination ? `${details.destination} · ` : ""}
                 {dateRange(details.start_date || null, details.end_date || null)}
+                {details.website && (
+                  <>
+                    {" · "}
+                    <a
+                      href={details.website}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-white/40 underline-offset-2 transition hover:decoration-white"
+                    >
+                      🔗 Website
+                    </a>
+                  </>
+                )}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -647,8 +697,24 @@ export function EventWorkspace({
         title="Plans & spending"
         subtitle="Add what you're doing, then tap “who paid” — splitting is fine."
         action={
-          items.length > 1 ? (
-            <div className="flex items-center gap-2">
+          items.length > 0 ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex rounded-full border border-border bg-surface p-0.5 text-xs font-semibold">
+                <button
+                  onClick={() => setItemView("list")}
+                  className={`rounded-full px-2.5 py-1 transition ${itemView === "list" ? "bg-indigo/10 text-indigo" : "text-muted hover:text-foreground"}`}
+                >
+                  📋 List
+                </button>
+                <button
+                  onClick={() => setItemView("calendar")}
+                  className={`rounded-full px-2.5 py-1 transition ${itemView === "calendar" ? "bg-indigo/10 text-indigo" : "text-muted hover:text-foreground"}`}
+                >
+                  📅 Calendar
+                </button>
+              </div>
+              {itemView === "list" && items.length > 1 && (
+                <>
               <select
                 value={itemSort}
                 onChange={(e) => setItemSort(e.target.value)}
@@ -679,6 +745,8 @@ export function EventWorkspace({
                   </span>
                 )}
               </button>
+                </>
+              )}
             </div>
           ) : undefined
         }
@@ -686,7 +754,7 @@ export function EventWorkspace({
         <div className="space-y-2.5">
           <AddItemRow onAdd={addItem} planPointsPerDollar={ppd} />
 
-          {filtersOpen && items.length > 1 && (
+          {itemView === "list" && filtersOpen && items.length > 1 && (
             <div className="planit-pop flex flex-wrap items-center gap-2 rounded-2xl border border-indigo/40 bg-indigo/5 p-2">
               <div className="relative min-w-[140px] flex-1">
                 <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted">🔎</span>
@@ -739,7 +807,7 @@ export function EventWorkspace({
           )}
 
           {/* Active filters but panel collapsed — keep a clear escape hatch. */}
-          {!filtersOpen && activeFilterCount > 0 && (
+          {itemView === "list" && !filtersOpen && activeFilterCount > 0 && (
             <div className="flex items-center justify-between rounded-xl bg-indigo/5 px-3 py-1.5 text-xs text-muted">
               <span>
                 Showing {filteredItems.length} of {items.length}
@@ -755,12 +823,21 @@ export function EventWorkspace({
               No activities yet — add your first one above 👆
             </div>
           )}
-          {items.length > 0 && filteredItems.length === 0 && (
+          {itemView === "list" && items.length > 0 && filteredItems.length === 0 && (
             <div className="rounded-2xl border border-dashed border-border bg-surface/60 px-5 py-6 text-center text-sm text-muted">
               No activities match those filters.
             </div>
           )}
 
+          {itemView === "calendar" && items.length > 0 && (
+            <CalendarView
+              items={items}
+              planStart={details.start_date || null}
+              onOpen={setCalItemId}
+            />
+          )}
+
+          {itemView === "list" && (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={sortedItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-2.5">
@@ -786,8 +863,24 @@ export function EventWorkspace({
               </div>
             </SortableContext>
           </DndContext>
+          )}
         </div>
       </Section>
+
+      {calItemId && (() => {
+        const it = items.find((i) => i.id === calItemId);
+        if (!it) return null;
+        return (
+          <CalendarItemDialog
+            item={it}
+            contribs={contribs.filter((c) => c.item_id === it.id)}
+            currency={cur}
+            nameById={nameById}
+            memberById={memberById}
+            onClose={() => setCalItemId(null)}
+          />
+        );
+      })()}
 
       {/* Toasts */}
       <div className="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex flex-col items-center gap-2">
@@ -1663,6 +1756,259 @@ function ItemCard({
   );
 }
 
+/* ---- Calendar view ---------------------------------------------------- */
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+function CalendarView({
+  items,
+  planStart,
+  onOpen,
+}: {
+  items: ItemRow[];
+  planStart: string | null;
+  onOpen: (id: string) => void;
+}) {
+  // Open on the most relevant month: the plan's start, else the first dated activity.
+  const initial = useMemo(() => {
+    const seed = planStart ?? items.find((i) => i.item_date)?.item_date ?? null;
+    const d = seed ? new Date(seed + "T00:00:00") : new Date();
+    return { y: d.getFullYear(), m: d.getMonth() };
+  }, [planStart, items]);
+  const [ym, setYm] = useState(initial);
+  const todayKey = ymd(new Date());
+
+  // Day -> activities on it. Multi-day items appear on every day of their range
+  // (capped at 90 days so a typo'd end date can't explode the map).
+  const byDay = useMemo(() => {
+    const map = new Map<string, ItemRow[]>();
+    for (const it of items) {
+      if (!it.item_date) continue;
+      const start = new Date(it.item_date + "T00:00:00");
+      const end = it.item_end_date ? new Date(it.item_end_date + "T00:00:00") : start;
+      for (let d = new Date(start), n = 0; d <= end && n < 90; d.setDate(d.getDate() + 1), n++) {
+        const key = ymd(d);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(it);
+      }
+    }
+    for (const arr of map.values())
+      arr.sort((a, b) => ((a.item_time ?? "99") < (b.item_time ?? "99") ? -1 : 1));
+    return map;
+  }, [items]);
+
+  const undated = items.filter((i) => !i.item_date);
+  const first = new Date(ym.y, ym.m, 1);
+  const startDow = first.getDay();
+  const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
+  const weeks = Math.ceil((startDow + daysInMonth) / 7);
+  const cells = Array.from({ length: weeks * 7 }, (_, i) => new Date(ym.y, ym.m, i - startDow + 1));
+  const monthLabel = first.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  function shift(delta: number) {
+    setYm(({ y, m }) => {
+      const d = new Date(y, m + delta, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+  }
+
+  const navBtn =
+    "flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-muted transition hover:text-indigo active:scale-95";
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <button onClick={() => shift(-1)} aria-label="Previous month" className={navBtn}>
+          ‹
+        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold">{monthLabel}</span>
+          <button
+            onClick={() => setYm(initial)}
+            className="rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-muted transition hover:text-indigo"
+          >
+            Plan
+          </button>
+        </div>
+        <button onClick={() => shift(1)} aria-label="Next month" className={navBtn}>
+          ›
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 text-center text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="py-1">
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-xl border border-border bg-border">
+        {cells.map((d) => {
+          const key = ymd(d);
+          const inMonth = d.getMonth() === ym.m;
+          const dayItems = byDay.get(key) ?? [];
+          const isToday = key === todayKey;
+          return (
+            <div
+              key={key}
+              className={`min-h-16 bg-surface p-1 sm:min-h-20 ${inMonth ? "" : "opacity-35"}`}
+            >
+              <div
+                className={`mx-auto flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold sm:mx-0 ${
+                  isToday ? "planit-gradient text-white" : "text-muted"
+                }`}
+              >
+                {d.getDate()}
+              </div>
+              <div className="mt-0.5 space-y-0.5">
+                {dayItems.map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => onOpen(it.id)}
+                    title={`${it.label}${it.item_time ? ` · ${timeLabel(it.item_time)}` : ""}`}
+                    className="block w-full truncate rounded bg-indigo/10 px-1 py-0.5 text-left text-[9px] font-semibold text-indigo transition hover:bg-indigo/20 sm:text-[10px]"
+                  >
+                    {categoryMeta(it.category).emoji} {it.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {undated.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+            No date yet
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {undated.map((it) => (
+              <button
+                key={it.id}
+                onClick={() => onOpen(it.id)}
+                className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold text-muted transition hover:border-indigo hover:text-indigo"
+              >
+                {categoryMeta(it.category).emoji} {it.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarItemDialog({
+  item,
+  contribs,
+  currency,
+  nameById,
+  memberById,
+  onClose,
+}: {
+  item: ItemRow;
+  contribs: ContributionRow[];
+  currency: string;
+  nameById: Map<string, string>;
+  memberById: Map<string, MemberRow>;
+  onClose: () => void;
+}) {
+  const meta = categoryMeta(item.category);
+  const actual = contribs.reduce((s, c) => s + Number(c.amount), 0);
+
+  const Row = ({ children }: { children: React.ReactNode }) => (
+    <div className="text-sm text-muted">{children}</div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="planit-pop w-full max-w-sm space-y-3 rounded-3xl border border-border bg-surface p-6 shadow-2xl"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-background text-xl">
+            {meta.emoji}
+          </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-bold">{item.label}</h2>
+            <div className="text-xs text-muted">{meta.label}</div>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          {item.item_date && (
+            <Row>
+              📅 {dateRange(item.item_date, item.item_end_date, { weekday: true })}
+              {item.item_time && ` · ${timeLabel(item.item_time)}`}
+            </Row>
+          )}
+          {item.address && (
+            <Row>
+              📍{" "}
+              <a
+                href={`https://maps.google.com/?q=${encodeURIComponent(item.address)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-indigo underline decoration-indigo/40 underline-offset-2 hover:decoration-indigo"
+              >
+                {item.address}
+              </a>
+            </Row>
+          )}
+          {item.reservation_number && (
+            <Row>
+              🎫 Reservation{" "}
+              <span className="tabular font-semibold text-foreground">{item.reservation_number}</span>
+            </Row>
+          )}
+          {item.planned_amount > 0 && (
+            <Row>
+              💰 estimate <span className="tabular font-semibold text-foreground">{money(item.planned_amount, currency)}</span>
+            </Row>
+          )}
+        </div>
+
+        {contribs.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+            {contribs.map((c) => (
+              <span
+                key={c.id}
+                className="tabular flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs"
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: memberById.get(c.member_id)?.color ?? "#6366f1" }}
+                />
+                <span className="font-semibold">{nameById.get(c.member_id) ?? "?"}</span>
+                <span className="text-muted">
+                  {c.is_points && c.points != null ? pointsLabel(Number(c.points)) : money(Number(c.amount), currency)}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="tabular text-sm font-bold">
+          {money(actual, currency)} <span className="font-normal text-muted">paid so far</span>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-muted hover:text-foreground"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type NewItemFields = {
   label: string;
   category: string;
@@ -2197,6 +2543,7 @@ function MergeDialog({
 type Details = {
   name: string;
   destination: string;
+  website: string;
   start_date: string;
   end_date: string;
   currency: string;
@@ -2246,6 +2593,19 @@ function SettingsDialog({
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted">Destination</label>
           <input value={d.destination} onChange={(e) => set({ destination: e.target.value })} className={input} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted">Website</label>
+          <input
+            type="url"
+            value={d.website}
+            onChange={(e) => set({ website: e.target.value })}
+            placeholder="https://the-venue-or-airbnb.com"
+            className={input}
+          />
+          <p className="text-[11px] text-muted">
+            The site&apos;s preview image becomes this plan&apos;s card image on your dashboard.
+          </p>
         </div>
         <div className="flex gap-3">
           <div className="flex-1 space-y-1">
