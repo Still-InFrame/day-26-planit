@@ -21,7 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase/client";
 import { computeSummary, settleUp } from "@/lib/calc";
-import { money, dateRange, CURRENCIES, pointsLabel } from "@/lib/format";
+import { money, dateRange, timeLabel, CURRENCIES, pointsLabel } from "@/lib/format";
 import { formatPhone } from "@/lib/countries";
 import {
   CATEGORIES,
@@ -120,6 +120,7 @@ export function EventWorkspace({
   const [itemSearch, setItemSearch] = useState("");
   const [itemCategory, setItemCategory] = useState("all");
   const [itemMember, setItemMember] = useState("all");
+  const [itemPaid, setItemPaid] = useState("all"); // all | unpaid | paid
   const [itemSort, setItemSort] = useState("added");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const itemTotals = useMemo(() => {
@@ -137,14 +138,22 @@ export function EventWorkspace({
   }, [contribs]);
   const filteredItems = useMemo(() => {
     const q = itemSearch.trim().toLowerCase();
+    // "Paid" = fully covered: logged >= estimate (or anything logged when there's
+    // no estimate). Partially covered still owes money, so it counts as unpaid.
+    const isPaid = (it: ItemRow) => {
+      const actual = itemTotals.get(it.id) ?? 0;
+      return it.planned_amount > 0 ? actual >= Number(it.planned_amount) : actual > 0;
+    };
     return items.filter((it) => {
       if (itemCategory !== "all" && it.category !== itemCategory) return false;
       if (q && !it.label.toLowerCase().includes(q)) return false;
       if (itemMember !== "all" && !(contribMembersByItem.get(it.id)?.has(itemMember) ?? false))
         return false;
+      if (itemPaid === "paid" && !isPaid(it)) return false;
+      if (itemPaid === "unpaid" && isPaid(it)) return false;
       return true;
     });
-  }, [items, itemSearch, itemCategory, itemMember, contribMembersByItem]);
+  }, [items, itemSearch, itemCategory, itemMember, itemPaid, contribMembersByItem, itemTotals]);
   const sortedItems = useMemo(() => {
     const arr = [...filteredItems];
     if (itemSort === "amount_desc") arr.sort((a, b) => (itemTotals.get(b.id) ?? 0) - (itemTotals.get(a.id) ?? 0));
@@ -152,17 +161,24 @@ export function EventWorkspace({
     else if (itemSort === "name") arr.sort((a, b) => a.label.localeCompare(b.label));
     else if (itemSort === "date")
       arr.sort((a, b) => {
-        // by start date ascending, undated last
+        // by start date ascending, undated last; same day -> by time, untimed last
         if (!a.item_date && !b.item_date) return 0;
         if (!a.item_date) return 1;
         if (!b.item_date) return -1;
-        return a.item_date < b.item_date ? -1 : a.item_date > b.item_date ? 1 : 0;
+        if (a.item_date !== b.item_date) return a.item_date < b.item_date ? -1 : 1;
+        const at = a.item_time ?? "99";
+        const bt = b.item_time ?? "99";
+        return at < bt ? -1 : at > bt ? 1 : 0;
       });
     return arr; // "added" keeps the manual (sort_order) order — drag-reorderable
   }, [filteredItems, itemSort, itemTotals]);
   // Manual drag-reorder only makes sense in the natural order with no filters.
   const dragEnabled =
-    itemSort === "added" && !itemSearch.trim() && itemCategory === "all" && itemMember === "all";
+    itemSort === "added" &&
+    !itemSearch.trim() &&
+    itemCategory === "all" &&
+    itemMember === "all" &&
+    itemPaid === "all";
   // Pointer sensor works for mouse AND touch; distance guard so taps/scrolls don't drag.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -194,11 +210,13 @@ export function EventWorkspace({
   const activeFilterCount =
     (itemSearch.trim() ? 1 : 0) +
     (itemCategory !== "all" ? 1 : 0) +
-    (itemMember !== "all" ? 1 : 0);
+    (itemMember !== "all" ? 1 : 0) +
+    (itemPaid !== "all" ? 1 : 0);
   function clearFilters() {
     setItemSearch("");
     setItemCategory("all");
     setItemMember("all");
+    setItemPaid("all");
   }
 
   // Connections not already on this plan — offered as one-tap adds.
@@ -321,25 +339,22 @@ export function EventWorkspace({
     await supabase.from("planit_members").delete().eq("id", id);
     reload();
   }
-  async function addItem(
-    label: string,
-    category: string,
-    planned: number,
-    ptsRate: number | null,
-    startDate: string | null,
-    endDate: string | null,
-  ) {
+  async function addItem(f: NewItemFields) {
     await supabase.from("planit_items").insert({
       event_id: event.id,
-      label,
-      category,
-      planned_amount: planned,
-      points_per_dollar: ptsRate,
-      item_date: startDate,
-      item_end_date: startDate ? endDate : null,
+      label: f.label,
+      category: f.category,
+      planned_amount: f.planned,
+      points_per_dollar: f.ptsRate,
+      item_date: f.startDate,
+      // time and end date only make sense alongside a start date
+      item_time: f.startDate ? f.startTime : null,
+      item_end_date: f.startDate ? f.endDate : null,
+      address: f.address,
+      reservation_number: f.reservation,
       sort_order: items.length,
     });
-    toast(`Added “${label}”`);
+    toast(`Added “${f.label}”`);
     reload();
   }
   async function removeItem(id: string) {
@@ -702,6 +717,15 @@ export function EventWorkspace({
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>{nameById.get(m.id) ?? "Guest"} paid</option>
                 ))}
+              </select>
+              <select
+                value={itemPaid}
+                onChange={(e) => setItemPaid(e.target.value)}
+                className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-indigo"
+              >
+                <option value="all">Paid &amp; unpaid</option>
+                <option value="unpaid">🔴 Not paid yet</option>
+                <option value="paid">✅ Paid only</option>
               </select>
               {activeFilterCount > 0 && (
                 <button
@@ -1256,7 +1280,10 @@ function ItemCard({
   const [ePlanned, setEPlanned] = useState(String(item.planned_amount || ""));
   const [ePtsRate, setEPtsRate] = useState(item.points_per_dollar != null ? String(item.points_per_dollar) : "");
   const [eStart, setEStart] = useState(item.item_date ?? "");
+  const [eTime, setETime] = useState(item.item_time?.slice(0, 5) ?? ""); // "HH:MM:SS" -> input value
   const [eEnd, setEEnd] = useState(item.item_end_date ?? "");
+  const [eAddress, setEAddress] = useState(item.address ?? "");
+  const [eReservation, setEReservation] = useState(item.reservation_number ?? "");
   function saveEdit() {
     if (!eLabel.trim()) return;
     onUpdate({
@@ -1265,7 +1292,10 @@ function ItemCard({
       planned_amount: parseFloat(ePlanned) || 0,
       points_per_dollar: ePtsRate.trim() ? Number(ePtsRate) : null,
       item_date: eStart || null,
+      item_time: eStart && eTime ? eTime : null, // time only valid with a start
       item_end_date: eStart && eEnd ? eEnd : null, // end only valid with a start
+      address: eAddress.trim() || null,
+      reservation_number: eReservation.trim() || null,
     });
     setEditing(false);
   }
@@ -1353,7 +1383,20 @@ function ItemCard({
           {item.item_date && (
             <div className="text-[11px] text-muted">
               📅 {dateRange(item.item_date, item.item_end_date, { weekday: true })}
+              {item.item_time && ` · ${timeLabel(item.item_time)}`}
             </div>
+          )}
+          {item.address && (
+            <a
+              href={`https://maps.google.com/?q=${encodeURIComponent(item.address)}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="Open in Google Maps"
+              className="block truncate text-[11px] text-muted transition hover:text-indigo"
+            >
+              📍 {item.address}
+            </a>
           )}
           {!expanded &&
             (dotMembers.length > 0 ? (
@@ -1440,8 +1483,16 @@ function ItemCard({
                 <input
                   type="date"
                   value={eStart}
-                  onChange={(e) => { setEStart(e.target.value); if (!e.target.value) setEEnd(""); }}
+                  onChange={(e) => { setEStart(e.target.value); if (!e.target.value) { setEEnd(""); setETime(""); } }}
                   className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
+                />
+                <input
+                  type="time"
+                  value={eTime}
+                  disabled={!eStart}
+                  onChange={(e) => setETime(e.target.value)}
+                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo disabled:opacity-50"
+                  title={eStart ? "Start time (optional)" : "Set a start date first"}
                 />
                 <span className="text-xs text-muted">to</span>
                 <input
@@ -1454,14 +1505,34 @@ function ItemCard({
                   title={eStart ? "End date (optional)" : "Set a start date first"}
                 />
               </div>
+              <input
+                value={eAddress}
+                onChange={(e) => setEAddress(e.target.value)}
+                placeholder="📍 Address (optional)"
+                onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
+              />
+              <input
+                value={eReservation}
+                onChange={(e) => setEReservation(e.target.value)}
+                placeholder="🎫 Reservation # (optional)"
+                onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
+              />
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); setEStart(item.item_date ?? ""); setEEnd(item.item_end_date ?? ""); }} className="text-xs font-semibold text-muted">
+                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); setEStart(item.item_date ?? ""); setETime(item.item_time?.slice(0, 5) ?? ""); setEEnd(item.item_end_date ?? ""); setEAddress(item.address ?? ""); setEReservation(item.reservation_number ?? ""); }} className="text-xs font-semibold text-muted">
                   Cancel
                 </button>
                 <button onClick={saveEdit} className="planit-gradient rounded-lg px-3 py-1.5 text-xs font-semibold text-white">
                   Save
                 </button>
               </div>
+            </div>
+          )}
+          {!editing && item.reservation_number && (
+            <div className="mb-2 text-[11px] text-muted">
+              🎫 Reservation{" "}
+              <span className="tabular font-semibold text-foreground">{item.reservation_number}</span>
             </div>
           )}
           {!editing && item.planned_amount > 0 && (
@@ -1592,18 +1663,23 @@ function ItemCard({
   );
 }
 
+type NewItemFields = {
+  label: string;
+  category: string;
+  planned: number;
+  ptsRate: number | null;
+  startDate: string | null;
+  startTime: string | null;
+  endDate: string | null;
+  address: string | null;
+  reservation: string | null;
+};
+
 function AddItemRow({
   onAdd,
   planPointsPerDollar,
 }: {
-  onAdd: (
-    label: string,
-    category: string,
-    planned: number,
-    ptsRate: number | null,
-    startDate: string | null,
-    endDate: string | null,
-  ) => void;
+  onAdd: (f: NewItemFields) => void;
   planPointsPerDollar: number;
 }) {
   const [label, setLabel] = useState("");
@@ -1611,25 +1687,34 @@ function AddItemRow({
   const [planned, setPlanned] = useState("");
   const [ptsRate, setPtsRate] = useState("");
   const [start, setStart] = useState("");
+  const [startTime, setStartTime] = useState("");
   const [end, setEnd] = useState("");
+  const [address, setAddress] = useState("");
+  const [reservation, setReservation] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
 
   function submit() {
     if (!label.trim()) return;
-    onAdd(
-      label.trim(),
+    onAdd({
+      label: label.trim(),
       category,
-      parseFloat(planned) || 0,
-      ptsRate.trim() ? Number(ptsRate) : null,
-      start || null,
-      end || null,
-    );
+      planned: parseFloat(planned) || 0,
+      ptsRate: ptsRate.trim() ? Number(ptsRate) : null,
+      startDate: start || null,
+      startTime: startTime || null,
+      endDate: end || null,
+      address: address.trim() || null,
+      reservation: reservation.trim() || null,
+    });
     setLabel("");
     setPlanned("");
     setCategory("other");
     setPtsRate("");
     setStart("");
+    setStartTime("");
     setEnd("");
+    setAddress("");
+    setReservation("");
     setMobileOpen(false);
   }
 
@@ -1678,9 +1763,17 @@ function AddItemRow({
           <input
             type="date"
             value={start}
-            onChange={(e) => { setStart(e.target.value); if (!e.target.value) setEnd(""); }}
+            onChange={(e) => { setStart(e.target.value); if (!e.target.value) { setEnd(""); setStartTime(""); } }}
             title="Start date"
             className={`${field} px-2 py-2 ${stacked ? "flex-1" : ""}`}
+          />
+          <input
+            type="time"
+            value={startTime}
+            disabled={!start}
+            onChange={(e) => setStartTime(e.target.value)}
+            title={start ? "Start time (optional)" : "Set a start date first"}
+            className={`${field} px-2 py-2 disabled:opacity-50 ${stacked ? "w-28" : ""}`}
           />
           <input
             type="date"
@@ -1692,6 +1785,20 @@ function AddItemRow({
             className={`${field} px-2 py-2 disabled:opacity-50 ${stacked ? "flex-1" : ""}`}
           />
         </div>
+        <input
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder="📍 Address (optional)"
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className={`${field} px-3 py-2 ${stacked ? "w-full" : "min-w-[180px] flex-1"}`}
+        />
+        <input
+          value={reservation}
+          onChange={(e) => setReservation(e.target.value)}
+          placeholder="🎫 Reservation # (optional)"
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className={`${field} px-3 py-2 ${stacked ? "w-full" : "w-48"}`}
+        />
       </>
     );
   }

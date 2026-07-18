@@ -36,6 +36,17 @@ export function dateRange(
   return withYear((start ?? end) as string);
 }
 
+// Postgres `time` ("HH:MM:SS" or "HH:MM") -> "7:30 PM".
+export function timeLabel(t: string | null): string {
+  if (!t) return "";
+  const [h, m] = t.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return "";
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function pointsLabel(n: number): string {
   return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n || 0)} pts`;
 }
