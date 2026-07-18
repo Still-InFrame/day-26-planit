@@ -1778,19 +1778,18 @@ function CalendarView({
   const [ym, setYm] = useState(initial);
   const todayKey = ymd(new Date());
 
-  // Day -> activities on it. Multi-day items appear on every day of their range
-  // (capped at 90 days so a typo'd end date can't explode the map).
+  // Day -> activities on it. Multi-day items show only on their start and end
+  // days (not every day in between) to keep the grid readable.
   const byDay = useMemo(() => {
     const map = new Map<string, ItemRow[]>();
+    const add = (key: string, it: ItemRow) => {
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(it);
+    };
     for (const it of items) {
       if (!it.item_date) continue;
-      const start = new Date(it.item_date + "T00:00:00");
-      const end = it.item_end_date ? new Date(it.item_end_date + "T00:00:00") : start;
-      for (let d = new Date(start), n = 0; d <= end && n < 90; d.setDate(d.getDate() + 1), n++) {
-        const key = ymd(d);
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push(it);
-      }
+      add(it.item_date, it);
+      if (it.item_end_date && it.item_end_date !== it.item_date) add(it.item_end_date, it);
     }
     for (const arr of map.values())
       arr.sort((a, b) => ((a.item_time ?? "99") < (b.item_time ?? "99") ? -1 : 1));
