@@ -36,6 +36,36 @@ export function dateRange(
   return withYear((start ?? end) as string);
 }
 
+// Weekday date range with per-end times:
+//   "Thu, Jul 30 · 7:30 PM – Tue, Aug 4, 2026 · 11:00 AM"
+//   single day with both times -> "Sat, Aug 1, 2026 · 7:30 PM – 9:00 PM"
+export function dateTimeRange(
+  start: string | null,
+  startTime: string | null,
+  end: string | null,
+  endTime: string | null,
+): string {
+  if (!start) return "Dates TBD";
+  const wd = { weekday: "short" as const };
+  const d = (s: string) => new Date(s + "T00:00:00");
+  const withYear = (s: string) =>
+    d(s).toLocaleDateString("en-US", { ...wd, month: "short", day: "numeric", year: "numeric" });
+  const noYear = (s: string) =>
+    d(s).toLocaleDateString("en-US", { ...wd, month: "short", day: "numeric" });
+  const st = startTime ? ` · ${timeLabel(startTime)}` : "";
+  const et = endTime ? ` · ${timeLabel(endTime)}` : "";
+  if (!end || end === start) {
+    // One day. An end time here means "same day until X".
+    if (endTime)
+      return startTime
+        ? `${withYear(start)} · ${timeLabel(startTime)} – ${timeLabel(endTime)}`
+        : `${withYear(start)} · until ${timeLabel(endTime)}`;
+    return `${withYear(start)}${st}`;
+  }
+  const sameYear = d(start).getFullYear() === d(end).getFullYear();
+  return `${sameYear ? noYear(start) : withYear(start)}${st} – ${withYear(end)}${et}`;
+}
+
 // Postgres `time` ("HH:MM:SS" or "HH:MM") -> "7:30 PM".
 export function timeLabel(t: string | null): string {
   if (!t) return "";

@@ -72,6 +72,7 @@ export type ItemRow = {
   item_date: string | null; // start date
   item_time: string | null; // optional start time ("HH:MM:SS"), only with a date
   item_end_date: string | null; // optional end date
+  item_end_time: string | null; // optional end time; without an end date it means same-day
   address: string | null;
   reservation_number: string | null;
   sort_order: number;

@@ -21,7 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase/client";
 import { computeSummary, settleUp } from "@/lib/calc";
-import { money, dateRange, timeLabel, CURRENCIES, pointsLabel } from "@/lib/format";
+import { money, dateRange, dateTimeRange, timeLabel, CURRENCIES, pointsLabel } from "@/lib/format";
 import { formatPhone } from "@/lib/countries";
 import {
   CATEGORIES,
@@ -384,9 +384,10 @@ export function EventWorkspace({
       planned_amount: f.planned,
       points_per_dollar: f.ptsRate,
       item_date: f.startDate,
-      // time and end date only make sense alongside a start date
+      // times and end date only make sense alongside a start date
       item_time: f.startDate ? f.startTime : null,
       item_end_date: f.startDate ? f.endDate : null,
+      item_end_time: f.startDate ? f.endTime : null,
       address: f.address,
       reservation_number: f.reservation,
       sort_order: items.length,
@@ -1375,6 +1376,7 @@ function ItemCard({
   const [eStart, setEStart] = useState(item.item_date ?? "");
   const [eTime, setETime] = useState(item.item_time?.slice(0, 5) ?? ""); // "HH:MM:SS" -> input value
   const [eEnd, setEEnd] = useState(item.item_end_date ?? "");
+  const [eEndTime, setEEndTime] = useState(item.item_end_time?.slice(0, 5) ?? "");
   const [eAddress, setEAddress] = useState(item.address ?? "");
   const [eReservation, setEReservation] = useState(item.reservation_number ?? "");
   function saveEdit() {
@@ -1385,8 +1387,9 @@ function ItemCard({
       planned_amount: parseFloat(ePlanned) || 0,
       points_per_dollar: ePtsRate.trim() ? Number(ePtsRate) : null,
       item_date: eStart || null,
-      item_time: eStart && eTime ? eTime : null, // time only valid with a start
+      item_time: eStart && eTime ? eTime : null, // times only valid with a start
       item_end_date: eStart && eEnd ? eEnd : null, // end only valid with a start
+      item_end_time: eStart && eEndTime ? eEndTime : null,
       address: eAddress.trim() || null,
       reservation_number: eReservation.trim() || null,
     });
@@ -1475,8 +1478,7 @@ function ItemCard({
           <div className="truncate font-semibold leading-tight">{item.label}</div>
           {item.item_date && (
             <div className="text-[11px] text-muted">
-              📅 {dateRange(item.item_date, item.item_end_date, { weekday: true })}
-              {item.item_time && ` · ${timeLabel(item.item_time)}`}
+              📅 {dateTimeRange(item.item_date, item.item_time, item.item_end_date, item.item_end_time)}
             </div>
           )}
           {item.address && (
@@ -1576,7 +1578,7 @@ function ItemCard({
                 <input
                   type="date"
                   value={eStart}
-                  onChange={(e) => { setEStart(e.target.value); if (!e.target.value) { setEEnd(""); setETime(""); } }}
+                  onChange={(e) => { setEStart(e.target.value); if (!e.target.value) { setEEnd(""); setETime(""); setEEndTime(""); } }}
                   className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
                 />
                 <input
@@ -1597,6 +1599,14 @@ function ItemCard({
                   className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo disabled:opacity-50"
                   title={eStart ? "End date (optional)" : "Set a start date first"}
                 />
+                <input
+                  type="time"
+                  value={eEndTime}
+                  disabled={!eStart}
+                  onChange={(e) => setEEndTime(e.target.value)}
+                  className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo disabled:opacity-50"
+                  title={eStart ? "End time (optional — without an end date it means same day)" : "Set a start date first"}
+                />
               </div>
               <input
                 value={eAddress}
@@ -1613,7 +1623,7 @@ function ItemCard({
                 className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-indigo"
               />
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); setEStart(item.item_date ?? ""); setETime(item.item_time?.slice(0, 5) ?? ""); setEEnd(item.item_end_date ?? ""); setEAddress(item.address ?? ""); setEReservation(item.reservation_number ?? ""); }} className="text-xs font-semibold text-muted">
+                <button onClick={() => { setEditing(false); setELabel(item.label); setECategory(item.category); setEPlanned(String(item.planned_amount || "")); setEPtsRate(item.points_per_dollar != null ? String(item.points_per_dollar) : ""); setEStart(item.item_date ?? ""); setETime(item.item_time?.slice(0, 5) ?? ""); setEEnd(item.item_end_date ?? ""); setEEndTime(item.item_end_time?.slice(0, 5) ?? ""); setEAddress(item.address ?? ""); setEReservation(item.reservation_number ?? ""); }} className="text-xs font-semibold text-muted">
                   Cancel
                 </button>
                 <button onClick={saveEdit} className="planit-gradient rounded-lg px-3 py-1.5 text-xs font-semibold text-white">
@@ -1942,8 +1952,7 @@ function CalendarItemDialog({
         <div className="space-y-1.5">
           {item.item_date && (
             <Row>
-              📅 {dateRange(item.item_date, item.item_end_date, { weekday: true })}
-              {item.item_time && ` · ${timeLabel(item.item_time)}`}
+              📅 {dateTimeRange(item.item_date, item.item_time, item.item_end_date, item.item_end_time)}
             </Row>
           )}
           {item.address && (
@@ -2016,6 +2025,7 @@ type NewItemFields = {
   startDate: string | null;
   startTime: string | null;
   endDate: string | null;
+  endTime: string | null;
   address: string | null;
   reservation: string | null;
 };
@@ -2034,6 +2044,7 @@ function AddItemRow({
   const [start, setStart] = useState("");
   const [startTime, setStartTime] = useState("");
   const [end, setEnd] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [address, setAddress] = useState("");
   const [reservation, setReservation] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -2048,6 +2059,7 @@ function AddItemRow({
       startDate: start || null,
       startTime: startTime || null,
       endDate: end || null,
+      endTime: endTime || null,
       address: address.trim() || null,
       reservation: reservation.trim() || null,
     });
@@ -2058,6 +2070,7 @@ function AddItemRow({
     setStart("");
     setStartTime("");
     setEnd("");
+    setEndTime("");
     setAddress("");
     setReservation("");
     setMobileOpen(false);
@@ -2108,7 +2121,7 @@ function AddItemRow({
           <input
             type="date"
             value={start}
-            onChange={(e) => { setStart(e.target.value); if (!e.target.value) { setEnd(""); setStartTime(""); } }}
+            onChange={(e) => { setStart(e.target.value); if (!e.target.value) { setEnd(""); setStartTime(""); setEndTime(""); } }}
             title="Start date"
             className={`${field} px-2 py-2 ${stacked ? "flex-1" : ""}`}
           />
@@ -2120,6 +2133,8 @@ function AddItemRow({
             title={start ? "Start time (optional)" : "Set a start date first"}
             className={`${field} px-2 py-2 disabled:opacity-50 ${stacked ? "w-28" : ""}`}
           />
+        </div>
+        <div className={stacked ? "flex gap-2" : "contents"}>
           <input
             type="date"
             value={end}
@@ -2128,6 +2143,14 @@ function AddItemRow({
             onChange={(e) => setEnd(e.target.value)}
             title={start ? "End date (optional)" : "Set a start date first"}
             className={`${field} px-2 py-2 disabled:opacity-50 ${stacked ? "flex-1" : ""}`}
+          />
+          <input
+            type="time"
+            value={endTime}
+            disabled={!start}
+            onChange={(e) => setEndTime(e.target.value)}
+            title={start ? "End time (optional — without an end date it means same day)" : "Set a start date first"}
+            className={`${field} px-2 py-2 disabled:opacity-50 ${stacked ? "w-28" : ""}`}
           />
         </div>
         <input

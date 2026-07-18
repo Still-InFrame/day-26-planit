@@ -1,5 +1,5 @@
 import { computeSummary, settleUp } from "@/lib/calc";
-import { money, dateRange, timeLabel, pointsLabel } from "@/lib/format";
+import { money, dateRange, dateTimeRange, pointsLabel } from "@/lib/format";
 import {
   resolveName,
   categoryMeta,
@@ -143,8 +143,7 @@ export function PreviewWorkspace({
                       <h3 className="truncate font-semibold">{it.label}</h3>
                       {it.item_date && (
                         <div className="text-[11px] text-muted">
-                          📅 {dateRange(it.item_date, it.item_end_date, { weekday: true })}
-                          {it.item_time && ` · ${timeLabel(it.item_time)}`}
+                          📅 {dateTimeRange(it.item_date, it.item_time, it.item_end_date, it.item_end_time)}
                         </div>
                       )}
                       {it.address && (
